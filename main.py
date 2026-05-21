@@ -7,6 +7,7 @@ from src.square_mapper import (
     save_squares
 )
 from src.frame_stabilizer import find_stable_frame
+from src.occupancy_detector import is_square_occupied
 
 
 VIDEO_FOLDER = "videos"
@@ -70,6 +71,20 @@ for video_name in video_files:
             squares,
             output_dir=square_output_dir
         )
+
+        print("\nOccupancy Detection:")
+
+        for square_name, square_image in squares.items():
+
+            occupied, score, variance_score = is_square_occupied(square_image)
+
+            status = "Occupied" if occupied else "Empty"
+
+            print(
+                f"{square_name}: {status} "
+                f"(score={score})"
+                f"variance={variance_score:.2f})"
+            )
 
         print("Board detected successfully!")
         print("Board split into 64 squares!")

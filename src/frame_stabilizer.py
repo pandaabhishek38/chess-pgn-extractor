@@ -30,7 +30,7 @@ def find_stable_frame(video_path, output_name, stable_threshold=250000, stable_f
 
         movement_score = np.sum(diff)
 
-        print("Movement:", movement_score)
+        #print("Movement:", movement_score)
 
         if movement_score < stable_threshold:
 
