@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+debug/
+videos/
+*.pyc
+.DS_Store
