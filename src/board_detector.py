@@ -60,7 +60,7 @@ def detect_board(frame):
 
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    edges = cv2.Canny(blur, 50, 150)
+    edges = cv2.Canny(blur, 30, 100)
 
     cv2.imwrite("debug/edges.jpg", edges)
 
@@ -82,24 +82,33 @@ def detect_board(frame):
             continue
 
         # rotated rectangle around contour
-        rect = cv2.minAreaRect(contour)
+        x, y, w, h = cv2.boundingRect(contour)
 
-        box = cv2.boxPoints(rect)
+        aspect_ratio = w / float(h)
 
-        box = np.int32(box)
+        if aspect_ratio < 0.7 or aspect_ratio > 1.5:
+            continue
 
-        cv2.drawContours(
+        cv2.rectangle(
             debug_image,
-            [box],
-            0,
+            (x, y),
+            (x + w, y + h),
             (0, 255, 0),
             5
         )
 
         cv2.imwrite("debug/contours.jpg", debug_image)
 
-        board = perspective_transform(frame, box)
+        padding = 40
 
-        return board, box
+        x1 = max(x - padding, 0)
+        y1 = max(y - padding, 0)
+
+        x2 = min(x + w + padding, frame.shape[1])
+        y2 = min(y + h + padding, frame.shape[0])
+
+        board = frame[y1:y2, x1:x2]
+
+        return board, (x, y, w, h)
 
     return None, None

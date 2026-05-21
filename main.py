@@ -6,6 +6,8 @@ from src.square_mapper import (
     split_board_into_squares,
     save_squares
 )
+from src.frame_stabilizer import find_stable_frame
+
 
 VIDEO_FOLDER = "videos"
 
@@ -14,6 +16,7 @@ OUTPUT_FOLDER = "debug"
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 video_files = sorted(os.listdir(VIDEO_FOLDER))
+
 
 for video_name in video_files:
 
@@ -25,22 +28,13 @@ for video_name in video_files:
 
     print(f"\nProcessing: {video_name}")
 
-    cap = cv2.VideoCapture(video_path)
+    base_name = os.path.splitext(video_name)[0]
 
-    if not cap.isOpened():
-        print("Could not open video")
-        continue
+    # Find stable frame
+    frame = find_stable_frame(video_path, base_name)
 
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    middle_frame = total_frames // 2
-
-    cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
-
-    success, frame = cap.read()
-
-    if not success:
-        print("Could not read frame")
+    if frame is None:
+        print("Could not find stable frame")
         continue
 
     height = frame.shape[0]
@@ -48,8 +42,6 @@ for video_name in video_files:
     cropped_frame = frame[:int(height * 0.42), :]
 
     board, pts = detect_board(cropped_frame)
-
-    base_name = os.path.splitext(video_name)[0]
 
     cv2.imwrite(
         f"{OUTPUT_FOLDER}/{base_name}_frame.jpg",
@@ -84,5 +76,3 @@ for video_name in video_files:
 
     else:
         print("Board detection failed.")
-
-    cap.release()
