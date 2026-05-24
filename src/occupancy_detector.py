@@ -2,31 +2,80 @@ import cv2
 import numpy as np
 
 
-def is_square_occupied(square_image, edge_threshold=70000):
+def compare_squares(
+    squares_before,
+    squares_after
+):
 
-    gray = cv2.cvtColor(square_image, cv2.COLOR_BGR2GRAY)
+    diff_scores = {}
 
-    h, w = gray.shape
+    for square_name in squares_before:
 
-    margin_h = int(h * 0.15)
-    margin_w = int(w * 0.15)
+        img_a = squares_before[square_name]
+        img_b = squares_after[square_name]
 
-    gray = gray[
-        margin_h:h - margin_h,
-        margin_w:w - margin_w
-    ]
+        gray_a = cv2.cvtColor(
+            img_a,
+            cv2.COLOR_BGR2GRAY
+        )
 
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        gray_b = cv2.cvtColor(
+            img_b,
+            cv2.COLOR_BGR2GRAY
+        )
 
-    edges = cv2.Canny(blur, 50, 150)
+        # crop center region
+        h, w = gray_a.shape
 
-    edge_score = np.sum(edges)
+        margin_h = int(h * 0.15)
+        margin_w = int(w * 0.15)
 
-    variance_score = np.var(gray)
+        gray_a = gray_a[
+            margin_h:h - margin_h,
+            margin_w:w - margin_w
+        ]
 
-    occupied = (
-        edge_score > edge_threshold
-        or variance_score > 1200
-    )
+        gray_b = gray_b[
+            margin_h:h - margin_h,
+            margin_w:w - margin_w
+        ]
 
-    return occupied, edge_score, variance_score
+        diff = cv2.absdiff(
+            gray_a,
+            gray_b
+        )
+
+        diff = cv2.GaussianBlur(
+            diff,
+            (5, 5),
+            0
+        )
+
+        _, diff = cv2.threshold(
+            diff,
+            25,
+            255,
+            cv2.THRESH_BINARY
+        )
+
+        diff_score = np.sum(diff)
+
+        diff_scores[square_name] = float(diff_score)
+
+    return diff_scores
+
+
+def get_changed_squares(
+    diff_scores,
+    change_threshold=50000
+):
+
+    changed_squares = []
+
+    for square_name, score in diff_scores.items():
+
+        if score > change_threshold:
+
+            changed_squares.append(square_name)
+
+    return changed_squares
