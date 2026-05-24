@@ -4,6 +4,8 @@ import chess
 import numpy as np
 import json
 import copy
+import shutil
+import chess.pgn
 
 from src.frame_sequence import (
     extract_move_transition_frames
@@ -22,25 +24,40 @@ from src.occupancy_detector import (
     get_changed_squares
 )
 
-from src.inference import infer_move
+from src.inference import (
+    infer_move
+)
+
+from src.calibrate import calibrate_video
 
 
 VIDEO_FOLDER = "videos"
 
-video_files = sorted(os.listdir(VIDEO_FOLDER))
+OUTPUT_FOLDER = "outputs"
+
+DEBUG_FOLDER = "debug"
+
+CONFIG_FILE = "config.json"
+
+os.makedirs(
+    OUTPUT_FOLDER,
+    exist_ok=True
+)
+
+os.makedirs(
+    DEBUG_FOLDER,
+    exist_ok=True
+)
 
 
-for video_name in video_files:
+def process_video(video_path):
 
-    if not video_name.endswith(".mp4"):
-        continue
+    video_name = os.path.basename(
+        video_path
+    )
 
-    if video_name != "game_5.mp4":
-        continue
-
-    video_path = os.path.join(
-        VIDEO_FOLDER,
-        video_name
+    print(
+        f"\n=== Processing: {video_name} ==="
     )
 
     with open(
@@ -50,14 +67,50 @@ for video_name in video_files:
 
         calibration_data = json.load(f)
 
+    if video_path not in calibration_data:
+
+        print(
+            "\nNo calibration found "
+            "for this video."
+        )
+
+        print(
+            "Launching calibration..."
+        )
+
+        success = calibrate_video(
+            video_path
+        )
+
+        if not success:
+
+            print(
+                "\nCalibration failed."
+            )
+
+            return
+
+        with open(
+            CONFIG_FILE,
+            "r"
+        ) as f:
+
+            calibration_data = json.load(f)
+
     reference_pts = np.array(
         calibration_data[video_path],
         dtype=np.float32
     )
 
-    print(f"\nProcessing: {video_name}")
-
     game_board = chess.Board()
+
+    pgn_game = chess.pgn.Game()
+
+    pgn_game.headers["Event"] = video_name
+    pgn_game.headers["White"] = "Detected"
+    pgn_game.headers["Black"] = "Detected"
+
+    pgn_node = pgn_game
 
     stable_frames = extract_move_transition_frames(
         video_path
@@ -70,7 +123,7 @@ for video_name in video_files:
     confirmed_moves = 0
 
     print(
-        f"Stable Frames Found: "
+        f"\nStable Frames Found: "
         f"{len(stable_frames)}"
     )
 
@@ -83,20 +136,33 @@ for video_name in video_files:
             reference_pts
         )
 
-        board = cv2.rotate(board, cv2.ROTATE_90_CLOCKWISE)
+        if board is None:
 
-        if index <= 5:
+            board_detection_failures += 1
 
-            print(
-                f"Frame {index} calibration corners: "
-                f"{reference_pts}"
-            )
+            continue
+
+        # rotate because white pieces
+        # appear on left side in videos
+        board = cv2.rotate(
+            board,
+            cv2.ROTATE_90_CLOCKWISE
+        )
 
         # debug warped boards
-        if index <= 5:
+        if index <= 3:
+
+            print(
+                f"\nFrame {index} calibration corners:"
+            )
+
+            print(reference_pts)
 
             cv2.imwrite(
-                f"debug/board_{index}.jpg",
+                os.path.join(
+                    DEBUG_FOLDER,
+                    f"{video_name}_board_{index}.jpg"
+                ),
                 board
             )
 
@@ -105,27 +171,35 @@ for video_name in video_files:
         )
 
         # debug sample squares
-        if index <= 5:
+        if index <= 3:
 
             cv2.imwrite(
-                f"debug/e4_{index}.jpg",
+                os.path.join(
+                    DEBUG_FOLDER,
+                    f"{video_name}_e4_{index}.jpg"
+                ),
                 squares["e4"]
             )
 
             cv2.imwrite(
-                f"debug/a1_{index}.jpg",
+                os.path.join(
+                    DEBUG_FOLDER,
+                    f"{video_name}_a1_{index}.jpg"
+                ),
                 squares["a1"]
             )
 
-        # first frame initializes
+        # initialize baseline
         if previous_squares is None:
 
-            previous_squares = copy.deepcopy(squares)
+            previous_squares = copy.deepcopy(
+                squares
+            )
 
             continue
 
-        # compare current squares
-        # against previous frame squares
+        # compare current board
+        # against previous accepted board
         diff_scores = compare_squares(
             previous_squares,
             squares
@@ -136,8 +210,12 @@ for video_name in video_files:
         )
 
         print(
-            f"Frame {index}: "
-            f"{len(changed_squares)} changed: "
+            f"\nFrame {index}: "
+            f"{len(changed_squares)} changed"
+        )
+
+        print(
+            f"Changed Squares: "
             f"{sorted(changed_squares)}"
         )
 
@@ -151,22 +229,29 @@ for video_name in video_files:
             f"{top_diffs}"
         )
 
-        sorted_diffs = sorted(
-            diff_scores.items(), key=lambda x: -x[1]
-        )
-
-        top_vals = [v for _, v in sorted_diffs[:5]]
-
+        # fallback candidate set
         top_n = [
             sq for sq, _ in sorted(
-                diff_scores.items(), key=lambda x: -x[1]
+                diff_scores.items(),
+                key=lambda x: -x[1]
             )[:6]
         ]
 
+        # exact move candidates
         if len(changed_squares) == 2:
-            status, move = infer_move(changed_squares, game_board)
+
+            status, move = infer_move(
+                changed_squares,
+                game_board
+            )
+
+        # noisy candidate fallback
         else:
-            status, move = infer_move(top_n, game_board)
+
+            status, move = infer_move(
+                top_n,
+                game_board
+            )
 
         if status == "noisy":
 
@@ -175,18 +260,40 @@ for video_name in video_files:
         elif status == "legal_failure":
 
             legal_move_failures += 1
-            attempted = changed_squares if len(changed_squares) == 2 else top_n
-            print(f"  Legal failure: tried {attempted}")
-            print(f"  Turn: {'White' if game_board.turn else 'Black'}")
-            print(f"  Legal moves: {[m.uci() for m in list(game_board.legal_moves)[:8]]}")
+
+            attempted = (
+                changed_squares
+                if len(changed_squares) == 2
+                else top_n
+            )
+
+            print(
+                f"Legal failure: "
+                f"tried {attempted}"
+            )
+
+            print(
+                f"Turn: "
+                f"{'White' if game_board.turn else 'Black'}"
+            )
 
         elif status == "legal_move":
 
             confirmed_moves += 1
 
-            print(f"Detected Move: {move}")
+            print(
+                f"Detected Move: {move}"
+            )
 
-            previous_squares = copy.deepcopy(squares)
+            # update PGN
+            pgn_node = pgn_node.add_variation(
+                move
+            )
+
+            # update accepted baseline
+            previous_squares = copy.deepcopy(
+                squares
+            )
 
     print("\n===== VIDEO SUMMARY =====")
 
@@ -213,4 +320,106 @@ for video_name in video_files:
     print(
         f"Board Detection Failures: "
         f"{board_detection_failures}"
+    )
+
+    pgn_path = os.path.join(
+        OUTPUT_FOLDER,
+        video_name.replace(".mp4", ".pgn")
+    )
+
+    with open(
+        pgn_path,
+        "w"
+    ) as pgn_file:
+
+        exporter = chess.pgn.FileExporter(
+            pgn_file
+        )
+
+        pgn_game.accept(exporter)
+
+    print(
+        f"\nPGN saved to: "
+        f"{pgn_path}"
+    )
+
+
+print("\n=== Chess Video to PGN Pipeline ===")
+
+print("\n1. Use existing video")
+
+print("2. Upload new video")
+
+choice = input(
+    "\nChoose option: "
+)
+
+if choice == "1":
+
+    video_files = sorted([
+        f for f in os.listdir(
+            VIDEO_FOLDER
+        )
+        if f.endswith(".mp4")
+    ])
+
+    print("\nAvailable videos:\n")
+
+    for index, video in enumerate(
+        video_files
+    ):
+
+        print(
+            f"{index + 1}. {video}"
+        )
+
+    selected = int(
+        input(
+            "\nSelect video number: "
+        )
+    ) - 1
+
+    selected_video = video_files[
+        selected
+    ]
+
+    video_path = os.path.join(
+        VIDEO_FOLDER,
+        selected_video
+    )
+
+    process_video(video_path)
+
+elif choice == "2":
+
+    source_path = input(
+        "\nEnter full path to video: "
+    )
+
+    file_name = os.path.basename(
+        source_path
+    )
+
+    destination_path = os.path.join(
+        VIDEO_FOLDER,
+        file_name
+    )
+
+    shutil.copy(
+        source_path,
+        destination_path
+    )
+
+    print(
+        f"\nUploaded video to:"
+    )
+
+    print(destination_path)
+
+    process_video(destination_path)
+
+else:
+
+    print(
+        "\nInvalid option selected."
     )

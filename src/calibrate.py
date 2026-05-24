@@ -1,118 +1,128 @@
 import cv2
 import json
-import sys
 
 
-video_path = sys.argv[1]
-
-cap = cv2.VideoCapture(video_path)
-
-ret, frame = cap.read()
-
-cap.release()
-
-if not ret:
-
-    print("Failed to load video")
-
-    sys.exit()
+CONFIG_FILE = "config.json"
 
 
-corners = []
+def calibrate_video(video_path):
 
+    cap = cv2.VideoCapture(
+        video_path
+    )
 
-def click_event(event, x, y, flags, param):
+    ret, frame = cap.read()
 
-    global frame
+    cap.release()
 
-    if event == cv2.EVENT_LBUTTONDOWN:
-
-        corners.append([x, y])
+    if not ret:
 
         print(
-            f"Corner {len(corners)}: "
-            f"({x}, {y})"
+            "Failed to load video"
         )
 
-        cv2.circle(
-            frame,
-            (x, y),
-            8,
-            (0, 255, 0),
-            -1
-        )
+        return False
 
-        cv2.imshow(
-            "Calibration",
-            frame
-        )
+    corners = []
+
+    temp_frame = frame.copy()
+
+    def click_event(
+        event,
+        x,
+        y,
+        flags,
+        param
+    ):
+
+        nonlocal temp_frame
+        nonlocal corners
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+
+            corners.append([x, y])
+
+            print(
+                f"Corner {len(corners)}: "
+                f"({x}, {y})"
+            )
+
+            cv2.circle(
+                temp_frame,
+                (x, y),
+                8,
+                (0, 255, 0),
+                -1
+            )
+
+            cv2.imshow(
+                "Calibration",
+                temp_frame
+            )
+
+    print(
+        "\nClick board corners "
+        "in this order:"
+    )
+
+    print("1. Top-left")
+    print("2. Top-right")
+    print("3. Bottom-right")
+    print("4. Bottom-left")
+
+    cv2.imshow(
+        "Calibration",
+        temp_frame
+    )
+
+    cv2.setMouseCallback(
+        "Calibration",
+        click_event
+    )
+
+    while True:
 
         if len(corners) == 4:
+            break
 
-            print("Reached 4 corners")
+        key = cv2.waitKey(1) & 0xFF
 
-            try:
-
-                with open(
-                    "config.json",
-                    "r"
-                ) as f:
-
-                    config = json.load(f)
-
-            except:
-
-                config = {}
-
-            config[video_path] = corners
-
-            with open(
-                "config.json",
-                "w"
-            ) as f:
-
-                json.dump(
-                    config,
-                    f,
-                    indent=4
-                )
-
-            print("Calibration saved!")
-
-            cv2.waitKey(500)
+        if key == 27 or key == ord('q'):
 
             cv2.destroyAllWindows()
 
+            return False
 
-print(
-    "Click corners in order:\n"
-    "1. Top-left\n"
-    "2. Top-right\n"
-    "3. Bottom-right\n"
-    "4. Bottom-left"
-)
+    cv2.destroyAllWindows()
 
-cv2.imshow(
-    "Calibration",
-    frame
-)
+    try:
 
-cv2.waitKey(1)
+        with open(
+            CONFIG_FILE,
+            "r"
+        ) as f:
 
-cv2.setMouseCallback(
-    "Calibration",
-    click_event
-)
+            config = json.load(f)
 
-while True:
+    except:
 
-    if len(corners) == 4:
-        break
+        config = {}
 
-    key = cv2.waitKey(1) & 0xFF
+    config[video_path] = corners
 
-    if key == 27 or key == ord('q'):
-        break
+    with open(
+        CONFIG_FILE,
+        "w"
+    ) as f:
 
+        json.dump(
+            config,
+            f,
+            indent=4
+        )
 
-cv2.destroyAllWindows()
+    print(
+        "\nCalibration saved!"
+    )
+
+    return True
